@@ -21,7 +21,7 @@ clean:
 	rm -f $(TARGET)
 
 test:
-	go test -timeout=$(TEST_TIMEOUT) -cover -mod=vendor $$(go list ./...)
+	go test -timeout=$(TEST_TIMEOUT) -race -cover -mod=vendor $$(go list ./...)
 
 lint: check-fmt ineffassign
 ifeq (, $(shell which golint))
