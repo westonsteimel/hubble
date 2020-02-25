@@ -5,6 +5,8 @@ IMAGE_REPOSITORY ?= quay.io/covalent/hubble
 CONTAINER_ENGINE ?= docker
 TARGET=hubble
 
+TEST_TIMEOUT ?= 5s
+
 all: hubble
 
 hubble:
@@ -19,7 +21,7 @@ clean:
 	rm -f $(TARGET)
 
 test:
-	go test -timeout=30s -cover -mod=vendor $$(go list ./...)
+	go test -timeout=$(TEST_TIMEOUT) -cover -mod=vendor $$(go list ./...)
 
 lint: check-fmt ineffassign
 ifeq (, $(shell which golint))
