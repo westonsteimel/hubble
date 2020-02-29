@@ -26,11 +26,19 @@ import (
 	v1 "github.com/cilium/hubble/pkg/api/v1"
 	"github.com/cilium/hubble/pkg/container"
 	"github.com/cilium/hubble/pkg/filters"
-	"github.com/cilium/hubble/pkg/metrics"
 	"github.com/cilium/hubble/pkg/parser"
 	"github.com/cilium/hubble/pkg/parser/errors"
+	"github.com/cilium/hubble/pkg/server/serveroption"
+	"github.com/cilium/hubble/pkg/server/serveroption/metrics"
 	"github.com/gogo/protobuf/types"
 	"github.com/sirupsen/logrus"
+)
+
+var (
+	// DefaultOptions to include in the server
+	DefaultOptions = []serveroption.Option{
+		serveroption.WithProcessor(&metrics.ProcessMetrics{}),
+	}
 )
 
 // GRPCServer defines the interface for Hubble gRPC server, extending the
@@ -75,6 +83,8 @@ type LocalObserverServer struct {
 
 	// payloadParser decodes pb.Payload into pb.Flow
 	payloadParser *parser.Parser
+
+	opts serveroption.Options
 }
 
 // NewLocalServer returns a new local observer server.
@@ -82,8 +92,9 @@ func NewLocalServer(
 	payloadParser *parser.Parser,
 	maxFlows int,
 	logger *logrus.Entry,
+	options ...serveroption.Option,
 ) *LocalObserverServer {
-	return &LocalObserverServer{
+	s := &LocalObserverServer{
 		log:  logger,
 		ring: container.NewRing(maxFlows),
 		// have a channel with 1% of the max flows that we can receive
@@ -92,11 +103,37 @@ func NewLocalServer(
 		eventschan:    make(chan *observer.GetFlowsResponse, 100),
 		payloadParser: payloadParser,
 	}
+
+	// Include default options
+	options = append(options, DefaultOptions...)
+
+	for _, opt := range options {
+		// TODO: err checking (needs signature change on NewLocalServer
+		_ = opt(&s.opts)
+	}
+
+	return s
 }
 
 // Start implements GRPCServer.Start.
 func (s *LocalObserverServer) Start() {
 	for pl := range s.GetEventsChannel() {
+		ctx := context.Background()
+
+		// run all the preprocessors
+		for _, prep := range s.opts.Preprocessors {
+			err, stop := prep.Preprocess(ctx, pl)
+			if err != nil {
+				s.log.WithError(err).WithField(
+					"data", pl.Data,
+				).Info("failed to preprocess payload")
+			}
+			if stop {
+				break
+			}
+		}
+
+		// decode
 		flow, err := decodeFlow(s.payloadParser, pl)
 		if err != nil {
 			if !errors.IsErrInvalidType(err) {
@@ -105,7 +142,20 @@ func (s *LocalObserverServer) Start() {
 			continue
 		}
 
-		metrics.ProcessFlow(flow)
+		// run all the processors
+		for _, p := range s.opts.Processors {
+			err, stop := p.Process(ctx, flow)
+			if err != nil {
+				s.log.WithError(err).WithField(
+					"flow", flow,
+				).Info("failed to process flow")
+			}
+			if stop {
+				break
+			}
+		}
+
+		// insrert into the ring buffer
 		s.GetRingBuffer().Write(&v1.Event{
 			Timestamp: pl.Time,
 			Event:     flow,

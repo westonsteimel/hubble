@@ -15,6 +15,7 @@
 package logger
 
 import (
+	"io/ioutil"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -25,6 +26,14 @@ var (
 	log  *logrus.Entry
 	once sync.Once
 )
+
+// NoopLogger ...
+func NoopLogger() *logrus.Entry {
+	l := logrus.New()
+	l.Out = ioutil.Discard
+	e := logrus.NewEntry(l)
+	return e
+}
 
 // GetLogger returns the logger properly set up accordingly with the debug flag.
 func GetLogger() *logrus.Entry {

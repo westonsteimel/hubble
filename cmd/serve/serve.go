@@ -1,4 +1,4 @@
-// Copyright 2017-2019 Authors of Hubble
+// Copyright 2017-2020 Authors of Hubble
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -127,7 +127,6 @@ func New(log *logrus.Entry) *cobra.Command {
 	return serverCmd
 }
 
-// observerCmd represents the monitor command
 var (
 	maxFlows uint32
 

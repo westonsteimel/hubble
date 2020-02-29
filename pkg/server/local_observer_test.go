@@ -24,6 +24,7 @@ import (
 	"github.com/cilium/hubble/api/v1/observer"
 	"github.com/cilium/hubble/pkg/logger"
 	"github.com/cilium/hubble/pkg/parser"
+	"github.com/cilium/hubble/pkg/server/serveroption"
 	"github.com/cilium/hubble/pkg/testutils"
 	"github.com/gogo/protobuf/types"
 	"github.com/stretchr/testify/assert"
@@ -36,7 +37,8 @@ func TestNewLocalServer(t *testing.T) {
 		&testutils.NoopIdentityGetter,
 		&testutils.NoopDNSGetter,
 		&testutils.NoopIPGetter,
-		&testutils.NoopServiceGetter)
+		&testutils.NoopServiceGetter,
+	)
 	require.NoError(t, err)
 	s := NewLocalServer(pp, 10, logger.GetLogger())
 	assert.NotNil(t, s.GetStopped())
@@ -101,4 +103,45 @@ func TestLocalObserverServer_GetFlows(t *testing.T) {
 	err = s.GetFlows(req, fakeServer)
 	assert.NoError(t, err)
 	assert.Equal(t, req.Number, uint64(i))
+}
+
+func nooparser(t *testing.T) *parser.Parser {
+	pp, err := parser.New(
+		&testutils.NoopEndpointGetter,
+		&testutils.NoopIdentityGetter,
+		&testutils.NoopDNSGetter,
+		&testutils.NoopIPGetter,
+		&testutils.NoopServiceGetter,
+	)
+	require.NoError(t, err)
+	return pp
+}
+
+func TestPreprocessors(t *testing.T) {
+	pl1 := &pb.Payload{Data: []byte("pl1")}
+
+	s := NewLocalServer(
+		nooparser(t), 10, logger.NoopLogger(),
+		serveroption.WithPreprocessorFunc(func(ctx context.Context, pl *pb.Payload) (error, bool) {
+			assert.Equal(t, []byte("pl1"), pl.Data, "initial data not as expected")
+			pl.Data = []byte("patched") // modify pl
+			return nil, false
+		}),
+		serveroption.WithPreprocessorFunc(func(ctx context.Context, pl *pb.Payload) (error, bool) {
+			assert.Equal(t, []byte("patched"), pl.Data, "modified data expected")
+			return nil, true // stops execution
+		}),
+		serveroption.WithPreprocessorFunc(func(ctx context.Context, pl *pb.Payload) (error, bool) {
+			t.Error("should never get to third preprocessor")
+			return nil, false
+		}),
+	)
+
+	go s.Start()
+
+	e := s.GetEventsChannel()
+	e <- pl1
+
+	close(s.GetEventsChannel())
+	<-s.GetStopped()
 }
